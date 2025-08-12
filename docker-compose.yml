@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  node:
+    build: .
+    environment:
+      - NUM_NODES=${NUM_NODES}
+      - SCAN_RATE=${SCAN_RATE}
+      - P_EXPLOIT=${P_EXPLOIT}
+      - PATCH_TIME=${PATCH_TIME}
+      - BACKUP_PROB=${BACKUP_PROB}
+      - HOST_ID=${HOST_ID}
+    volumes:
+      - ./outputs:/app/outputs
+    networks:
+      - simnet
+
+networks:
+  simnet:
+    driver: bridge

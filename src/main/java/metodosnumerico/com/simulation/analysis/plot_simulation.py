@@ -4,34 +4,40 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sir_model import run_sir_simulation
 
-# Carregar CSV gerado pelo Java
-df = pd.read_csv("/home/matheus-menezes/Documentos/ProjetoMetodos/projetometodos/resultado.csv")
+# Carregar CSV
+df = pd.read_csv("/home/matheus-menezes/Documentos/ProjetoMetodos/projetometodos/outputs/resultados.csv")
 
-# Normalizar os dados
-total_nodes = df.loc[0, ['Susceptible', 'Infected', 'Recovered']].sum()
-df_norm = df[['Susceptible', 'Infected', 'Recovered']] / total_nodes
+# Filtrar apenas eventos de passo
+df_steps = df[df['event_type'] == 'step']
+
+# Permitir análise por run_id ou host_id
+run_id = df_steps['run_id'].unique()[0]  # escolha o primeiro experimento
+df_run = df_steps[df_steps['run_id'] == run_id]
+
+# Normalizar
+total_nodes = df_run.iloc[0][['infected_count', 'susceptible_count', 'recovered_count']].sum()
+df_norm = df_run[['infected_count', 'susceptible_count', 'recovered_count']] / total_nodes
 
 # Parâmetros do modelo SIR
-beta = 0.5  # taxa de infecção
-gamma = 0.1  # taxa de recuperação
-S0 = df_norm.loc[0, 'Susceptible']
-I0 = df_norm.loc[0, 'Infected']
-R0 = df_norm.loc[0, 'Recovered']
+beta = 0.5
+gamma = 0.1
+S0 = df_norm.iloc[0]['susceptible_count']
+I0 = df_norm.iloc[0]['infected_count']
+R0 = df_norm.iloc[0]['recovered_count']
 
-# Simulação com EDO
-t, sir_sim = run_sir_simulation(S0, I0, R0, beta, gamma, len(df))
+t, sir_sim = run_sir_simulation(S0, I0, R0, beta, gamma, len(df_run))
 
 # Plot
 plt.figure(figsize=(10,6))
-plt.plot(df['Step'], df_norm['Susceptible'], 'b--', label='Susc. (Simulação Java)')
-plt.plot(df['Step'], df_norm['Infected'], 'r--', label='Infec. (Simulação Java)')
-plt.plot(df['Step'], df_norm['Recovered'], 'g--', label='Recup. (Simulação Java)')
+plt.plot(df_run['event_value'], df_norm['susceptible_count'], 'b--', label='Susc. (Simulação Java)')
+plt.plot(df_run['event_value'], df_norm['infected_count'], 'r--', label='Infec. (Simulação Java)')
+plt.plot(df_run['event_value'], df_norm['recovered_count'], 'g--', label='Recup. (Simulação Java)')
 
 plt.plot(t, sir_sim[:,0], 'b', label='Susc. (SIR)')
 plt.plot(t, sir_sim[:,1], 'r', label='Infec. (SIR)')
 plt.plot(t, sir_sim[:,2], 'g', label='Recup. (SIR)')
 
-plt.xlabel("Dias")
+plt.xlabel("Passos")
 plt.ylabel("Proporção")
 plt.legend()
 plt.grid()

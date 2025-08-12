@@ -1,0 +1,241 @@
+# Relatório Técnico Detalhado: Simulação de Propagação de Malware em Rede Virtual
+
+---
+
+## 1. Visão Geral
+
+Este projeto simula, de forma segura e controlada, o comportamento de propagação de malware em uma rede virtual. Utiliza Java para a lógica de simulação, Docker para isolamento dos ambientes e Python para análise dos resultados. O objetivo é estudar como ataques se espalham, testar estratégias de defesa e comparar a dinâmica dos ataques com modelos epidemiológicos clássicos.
+
+---
+
+## 2. Tecnologias Utilizadas
+
+- **Java 21**: Implementação da lógica de rede, infecção e recuperação.
+- **Maven**: Gerenciamento de dependências e build do projeto Java.
+- **Docker & Docker Compose**: Criação de ambientes isolados, simulação de múltiplos hosts/nós e controle de rede virtual.
+- **Python 3 (pandas, matplotlib, scipy, numpy)**: Análise dos resultados e comparação com modelos epidemiológicos (SIR, SIR-V, SIR-Q).
+- **Linux**: Ambiente operacional para execução dos scripts e containers.
+
+---
+
+## 3. Passo a Passo do Desenvolvimento
+
+### a. Modelagem da Rede e dos Nós
+
+Cada nó é representado pela classe `Node`:
+
+```java
+public class Node {
+    private Estados estado;
+    private BancoDeDados banco;
+    private List<Node> vizinhos;
+
+    public Node(boolean possuiBackup) {
+        this.estado = Estados.SUSCEPTIBLE;
+        this.banco = new BancoDeDados(possuiBackup);
+        this.vizinhos = new ArrayList<>();
+    }
+    // ... métodos para infectar, recuperar, adicionar vizinhos ...
+}
+```
+
+- **Estado epidemiológico**: SUSCEPTIBLE, INFECTED, RECOVERED.
+- **Banco de dados**: Pode ser criptografado (simulando ransomware) e possuir backup.
+
+A rede é criada pela classe `Network`:
+
+```java
+public class Network {
+    private List<Node> nodes;
+    // ... parâmetros ...
+    public Network(int size, ...) {
+        // Cria os nós e conecta cada nó aos vizinhos (topologia circular)
+    }
+    // ... métodos para simular infecção e recuperação ...
+}
+```
+
+### b. Parâmetros de Simulação
+
+Configuráveis via variáveis de ambiente ou script:
+
+- `NUM_NODES`: número de nós simulados
+- `SCAN_RATE`: taxa de varredura (chance de tentar infectar vizinhos)
+- `P_EXPLOIT`: probabilidade de exploração (chance de infecção bem-sucedida)
+- `PATCH_TIME`: tempo de correção (chance de recuperação)
+- `BACKUP_PROB`: probabilidade de backup (chance de recuperação acelerada)
+
+Exemplo de leitura dos parâmetros no Java:
+
+```java
+int numNodes = Integer.parseInt(System.getenv().getOrDefault("NUM_NODES", "100"));
+double scanRate = Double.parseDouble(System.getenv().getOrDefault("SCAN_RATE", "0.1"));
+// ...
+```
+
+### c. Execução Isolada com Docker
+
+- O projeto é empacotado em um container Docker, garantindo isolamento total.
+- O Docker Compose permite escalar o número de nós facilmente e controlar a rede virtual.
+- Os resultados são salvos em um volume compartilhado (`outputs/resultados.csv`), acessível ao host para análise posterior.
+
+Exemplo de Dockerfile:
+
+```dockerfile
+FROM maven:3.9.6-eclipse-temurin-21
+WORKDIR /app
+COPY . /app
+RUN mvn clean package
+CMD ["java", "-cp", "target/classes", "metodosnumerico.com.App"]
+```
+
+### d. Simulação da Infecção e Propagação
+
+**Como funciona a infecção:**
+
+1. **Infecção inicial**: Um nó é infectado aleatoriamente.
+2. **Propagação**: A cada passo, cada nó infectado tenta infectar seus vizinhos.
+   - Para cada vizinho suscetível, há uma chance de infecção baseada em `infectionRate` (SCAN_RATE) e `pExploit` (P_EXPLOIT).
+   - Se o vizinho for infectado, seu banco de dados é criptografado.
+3. **Recuperação**: Nós infectados podem se recuperar espontaneamente ou mais rápido se tiverem backup.
+   - A chance de recuperação é definida por `recoveryRate` (PATCH_TIME) ou `backupRecoveryRate` (se possui backup).
+
+Trecho do método de propagação:
+
+```java
+private void step() {
+    List<Node> toInfect = new ArrayList<>();
+    List<Node> toRecover = new ArrayList<>();
+    for (Node node : nodes) {
+        if (node.getEstado() == Estados.INFECTED) {
+            for (Node vizinho : node.getVizinhos()) {
+                if (vizinho.getEstado() == Estados.SUSCEPTIBLE && Math.random() < infectionRate) {
+                    toInfect.add(vizinho);
+                }
+            }
+            if (Math.random() < (node.getBanco().possuiBackup() ? backupRecoveryRate : recoveryRate)) {
+                toRecover.add(node);
+            }
+        }
+    }
+    for (Node node : toInfect) node.infectar();
+    for (Node node : toRecover) node.recuperar();
+}
+```
+
+**Resumo da propagação:**
+- O malware se espalha de nó para nó, conforme a topologia e os parâmetros de infecção.
+- A recuperação depende da presença de backup e dos parâmetros de correção.
+
+### e. Registro dos Resultados
+
+A cada passo, o estado da rede é registrado em `outputs/resultados.csv`:
+
+```
+run_id,timestamp,host_id,event_type,event_value,infected_count,susceptible_count,recovered_count
+1754956664079-b1a290a1-2cfd-4d85-ad82-8de5d3e20c9f,1754956664097,f37133e4-4d4f-4b9c-b174-e958ff515f6c,step,0,1,9,0
+...
+```
+
+Cada linha representa o estado da rede em um passo da simulação.
+
+### f. Análise dos Resultados com Python
+
+Os scripts Python (`plot_simulation.py`, `plot_sirv.py`, etc.) leem o CSV, normalizam os dados e comparam com modelos epidemiológicos:
+
+```python
+df = pd.read_csv("outputs/resultados.csv")
+df_steps = df[df['event_type'] == 'step']
+# Normalização
+N = df_steps.iloc[0][['infected_count', 'susceptible_count', 'recovered_count']].sum()
+df_norm = df_steps[['infected_count', 'susceptible_count', 'recovered_count']] / N
+# Plot
+plt.plot(df_steps['event_value'], df_norm['infected_count'], 'r--', label='Infectados (Java)')
+```
+
+---
+
+## 4. Objetivos das Simulações (ampliado)
+
+- **Avaliar o impacto de diferentes estratégias de defesa**: Testar como backup, patching e topologia de rede influenciam a propagação do malware.
+- **Comparar a dinâmica da propagação com modelos epidemiológicos**: Validar se o comportamento do malware se assemelha a epidemias reais, usando modelos SIR, SIR-V, SIR-Q.
+- **Identificar pontos críticos de vulnerabilidade e resiliência**: Descobrir quais configurações tornam a rede mais ou menos suscetível a ataques.
+- **Estudar o efeito de intervenções**: Simular cenários com redução de taxa de infecção (intervenção), aumento de recuperação, vacinação (proteção extra).
+- **Gerar dados para análise estatística e visualização**: Permitir a construção de gráficos, tabelas e relatórios para embasar decisões de segurança.
+- **Testar múltiplos cenários de ataque**: Ransomware, worms, ataques com backup, etc.
+- **Avaliar repetição e sobreposição de dados**: Garantir que cada simulação seja única e que os parâmetros estejam corretos para evitar falhas na apresentação dos resultados.
+
+---
+
+## 5. Como os Ataques Ocorrem, Se Propagam e Tipos (ampliado)
+
+### a. Como ocorrem os ataques
+
+- **Infecção inicial**: Um nó é infectado aleatoriamente, simulando o início de um ataque.
+- **Exploração de vulnerabilidades**: Cada nó infectado tenta explorar vulnerabilidades dos vizinhos, com probabilidade definida pelos parâmetros.
+- **Criptografia de dados**: Ao ser infectado, o banco de dados do nó é criptografado, simulando um ataque de ransomware.
+
+### b. Como se propagam
+
+- **Propagação local**: O malware se espalha apenas para vizinhos conectados (topologia circular).
+- **Probabilidade de transmissão**: A chance de um nó infectar um vizinho depende dos parâmetros de infecção e exploração.
+- **Recuperação e defesa**: Nós com backup têm maior chance de recuperação, simulando estratégias de defesa.
+
+### c. Tipos de ataques simulados
+
+- **Ransomware**: Criptografa dados, exige recuperação.
+- **Worms**: Propagam-se rapidamente entre nós conectados.
+- **Ataques com backup**: Simulam a recuperação acelerada de sistemas protegidos.
+- **Intervenção**: Redução da taxa de infecção após certo tempo, simulando ações de contenção.
+- **Vacinação**: Protege parte dos nós, reduzindo a propagação.
+
+---
+
+## 6. Problemas Identificados e Correções Necessárias
+
+- **Repetição de dados de infectados entre simulações distintas**:  
+  Ocorre se múltiplos containers escrevem no mesmo arquivo sem diferenciação por `host_id` ou `run_id`.  
+  **Correção**:  
+    - Cada execução utiliza um `run_id` único.
+    - O CSV inclui `host_id` para diferenciar execuções.
+    - Scripts Python filtram por `run_id` para evitar sobreposição de dados.
+
+- **Parâmetros de Simulação**:  
+  Certifique-se de que os parâmetros são corretamente passados via `.env` e Docker Compose, e que cada container lê seus próprios valores.
+
+---
+
+## 7. Resumo Visual da Aplicação Java
+
+- **Rede de nós**: Cada nó é um objeto Java, conectado a outros, simulando uma rede real.
+- **Estados epidemiológicos**: Susceptível, infectado, recuperado.
+- **Banco de dados**: Pode ser criptografado (simulando ransomware) e possuir backup.
+- **Propagação**: Probabilística, baseada em parâmetros configuráveis.
+- **Execução**: Isolada em Docker, segura e sem risco real.
+- **Resultados**: Arquivo CSV robusto, pronto para análise e geração de gráficos.
+
+---
+
+## 8. Imagem/Resumo da Aplicação Java
+
++-------------------+      +-------------------+      +-------------------+
+|       Node 1      |<---->|       Node 2      |<---->|       Node 3      |
+| SUSCEPTIBLE       |      | INFECTED          |      | RECOVERED         |
+| Banco: backup     |      | Banco: criptograf |      | Banco: backup     |
++-------------------+      +-------------------+      +-------------------+
+         ^                        |                          |
+         |                        v                          v
+    (propagação)            (recuperação)              (propagação)
+
+- Cada nó pode infectar vizinhos, recuperar-se, ou ser protegido por backup.
+- O estado de cada nó é registrado a cada passo no CSV.
+- A análise Python gera gráficos como este:
+
+[grafico_simulacao.png]
+
+---
+
+## 9. Conclusão
+
+O projeto entrega uma plataforma robusta para simulação e análise de ataques de malware em redes virtuais, com total segurança e flexibilidade.
+Permite estudar estratégias de defesa, comparar com modelos epidemiológicos e visualizar a dinâmica dos ataques de forma
